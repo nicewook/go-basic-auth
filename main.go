@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -9,28 +10,22 @@ import (
 )
 
 const (
-	userAccountDB = "useraccounts.db"
+	userDB           = "user.db"
+	userAccountTable = "userAccountTable"
 )
 
-var (
-	db *sql.DB
-)
+var db *sql.DB
 
 func initDB() {
 	var err error
-	db, err = sql.Open("sqlite3", userAccountDB)
+	db, err = sql.Open("sqlite3", userDB)
 	if err != nil {
 		log.Fatalf("fail to open db file. %v", err)
 	}
-	// defer db.Close()
 
-	createTableQuery := `CREATE TABLE IF NOT EXISTS userAccounts (
-		username TEXT NOT NULL,
-		password TEXT NOT NULL
-		);`
-	_, err = db.Exec(createTableQuery)
-	if err != nil {
-		log.Fatalf("create table %v", err)
+	createTableQuery := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (username TEXT NOT NULL,	password TEXT NOT NULL);`, userAccountTable)
+	if _, err = db.Exec(createTableQuery); err != nil {
+		log.Fatalf("failed to create table %s: %v", userAccountTable, err)
 	}
 }
 

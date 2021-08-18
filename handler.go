@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -16,66 +17,58 @@ type Credential struct {
 
 func Signup(w http.ResponseWriter, r *http.Request) {
 	log.Println("Sign up")
-	creds := &Credential{}
-	if err := json.NewDecoder(r.Body).Decode(creds); err != nil { // https://stackoverflow.com/a/21198571/3382699
+	var creds Credential
+
+	// NewDecoder vs Unmarshal: https://stackoverflow.com/a/21198571/3382699
+	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
+		log.Printf("failed to Decode: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(creds.Password), 10) // what 8 means -
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(creds.Password), 10) // 10 means difficulty
 	if err != nil {
-		log.Printf("GenerateFromPassword: %v", err)
+		log.Printf("failed to GenerateFromPassword: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("add %v and %v", creds.Username, string(hashedPassword))
-	SaveQuery := `insert into userAccounts(username, password) values ($1, $2)`
-	stmt, err := db.Prepare(SaveQuery) // Prepare statement. This is good to avoid SQL injections
-	if err != nil {
-		log.Fatalf("prepare: ", err)
+	SaveQuery := fmt.Sprintf(`insert into %s(username, password) values ("%s", "%s")`, userAccountTable, creds.Username, string(hashedPassword))
+	if _, err := db.Exec(SaveQuery); err != nil {
+		log.Printf("failed to save user account: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
-	result, err := stmt.Exec(creds.Username, string(hashedPassword))
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Printf("result: %+v", result)
-
 }
 
 func Signin(w http.ResponseWriter, r *http.Request) {
 	log.Println("Sign in")
 
-	creds := &Credential{}
-	if err := json.NewDecoder(r.Body).Decode(creds); err != nil { // https://stackoverflow.com/a/21198571/3382699
+	var creds Credential
+	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
+		log.Printf("failed to Decode: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	log.Printf("received %v", creds)
-	log.Printf("Username %v", creds.Username)
 
-	SignInSQL := fmt.Sprintf(`SELECT password FROM userAccounts WHERE username = "%s";`, creds.Username)
-	var pw string
+	SignInSQL := fmt.Sprintf(`SELECT password FROM %s WHERE username = "%s";`, userAccountTable, creds.Username)
+	var storedPassword string
 
-	db.QueryRow(SignInSQL).Scan(&pw)
-	log.Printf("pw: %v", pw)
+	if err := db.QueryRow(SignInSQL).Scan(&storedPassword); err != nil {
+		if err == sql.ErrNoRows {
+			log.Printf("no user account found: %v", err)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		log.Printf("failed to get stored password: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 
-	// stored := &Credential{}
-	// if err := rows.Scan(&stored); err != nil {
-	// 	if err == sql.ErrNoRows {
-	// 		log.Printf("Scan: %v", err)
-	// 		w.WriteHeader(http.StatusUnauthorized)
-	// 		return
-	// 	}
-	// 	log.Printf("Scan: %v", err)
-	// 	w.WriteHeader(http.StatusInternalServerError)
-	// 	return
-	// }
-
-	// if err := bcrypt.CompareHashAndPassword([]byte(stored.Password), []byte(creds.Password)); err != nil {
-	// 	log.Printf("CompareHashAndPassword %v, %v", stored.Password, err)
-	// 	w.WriteHeader(http.StatusUnauthorized)
-	// 	return
-	// }
-	// log.Printf("storedCres.Password: %v", stored.Password)
+	if err := bcrypt.CompareHashAndPassword([]byte(storedPassword), []byte(creds.Password)); err != nil {
+		log.Printf("incorrect password, %v", err)
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	log.Println("correct password. signed in")
 }
